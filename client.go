@@ -73,7 +73,7 @@ func (c *Client) Publish(lat, lng float64, qos byte, retained bool, payload inte
 
 func celID2TopicName(id s2.CellID) string {
 	idString := strings.Replace(id.String(), "/", "", 1)
-	return strings.Replace(idString, "", "/", -1)
+	return strings.Replace(idString, "", "/", len(idString))
 }
 
 func capOnEarth(center s2.Point, radiusKm float64) s2.Cap {
