@@ -9,41 +9,66 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-type Client interface {
-}
-
-type client struct {
-	client        mqtt.Client
-	subscCh       chan<- mqtt.Message
-	subscTopic    string
+type Client struct {
+	Client        mqtt.Client
+	SubscCh       chan<- mqtt.Message
+	subscTopics   []string
 	subscRadiusKm float64
 }
 
-func NewClient(c mqtt.Client, subscRadiusKm float64) *client {
-	return &client{client: c, subscTopic: "", subscRadiusKm: subscRadiusKm}
+func NewClient(c mqtt.Client, subscRadiusKm float64) *Client {
+	return &Client{Client: c, subscRadiusKm: subscRadiusKm}
 }
 
-func (c *client) UpdateSubscribe(lat, lng float64, qos byte) {
+func (c *Client) UpdateSubscribe(lat, lng float64, qos byte) {
 	circle := capOnEarth(s2.PointFromLatLng(s2.LatLngFromDegrees(lat, lng)), 4)
 	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 1}
-	newTopic := celID2TopicName(rc.Covering(circle)[0]) + "/#"
+	cells := rc.Covering(circle)
+	newTopics := make([]string, len(cells))
+	for i, c := range cells {
+		newTopics[i] = celID2TopicName(c) + "/#"
+	}
+
+	unsubscTopics, subscTopics := extractUnduplicateTopics(c.subscTopics, newTopics)
 
 	var callback mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
-		c.subscCh <- msg
+		c.SubscCh <- msg
 	}
-	c.client.Subscribe(newTopic, qos, callback)
+	for _, t := range subscTopics {
+		if t != "" {
+			c.Client.Subscribe(t, qos, callback)
+			c.Client.Publish("/api/register", 1, false, t)
+		}
+	}
 
-	if c.subscTopic != newTopic || c.subscTopic != "" {
-		// NOTE: 古い Topic の Unsubscribe と GateWay への Unsibscribe 通知
-		c.client.Unsubscribe(c.subscTopic)
-		c.client.Publish("/api/unregister", 1, false, c.subscTopic)
+	for _, t := range unsubscTopics {
+		if t != "" {
+			c.Client.Unsubscribe(t)
+			c.Client.Publish("/api/unregister", 1, false, t)
+		}
 	}
-	c.subscTopic = newTopic
+
+	c.subscTopics = subscTopics
 }
 
-func (c *client) Publish(lat, lng float64, qos byte, retained bool, payload interface{}) mqtt.Token {
+func extractUnduplicateTopics(currentSubscTopics, newSubscTopics []string) (unsubscTopics, subscTopics []string) {
+	unsubscTopics = currentSubscTopics
+	subscTopics = newSubscTopics
+	for i, ct := range currentSubscTopics {
+		for j, nt := range newSubscTopics {
+			if ct == nt {
+				unsubscTopics[i] = ""
+				subscTopics[j] = ""
+				break
+			}
+		}
+	}
+	return unsubscTopics, subscTopics
+}
+
+func (c *Client) Publish(lat, lng float64, qos byte, retained bool, payload interface{}) mqtt.Token {
 	topic := celID2TopicName(s2.CellIDFromLatLng(s2.LatLngFromDegrees(lat, lng)))
-	return c.client.Publish(topic, qos, retained, payload)
+	return c.Client.Publish(topic, qos, retained, payload)
 }
 
 func celID2TopicName(id s2.CellID) string {
