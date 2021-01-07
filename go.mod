@@ -1,4 +1,4 @@
-module client
+module github.com/Takahiro55555/location-based-mqtt-client.golang
 
 go 1.13
 
