@@ -21,8 +21,8 @@ func NewClient(c mqtt.Client, subscRadiusKm float64) *Client {
 }
 
 func (c *Client) UpdateSubscribe(lat, lng float64, qos byte) {
-	circle := capOnEarth(s2.PointFromLatLng(s2.LatLngFromDegrees(lat, lng)), 4)
-	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 1}
+	circle := capOnEarth(s2.PointFromLatLng(s2.LatLngFromDegrees(lat, lng)), c.subscRadiusKm)
+	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 4}
 	cells := rc.Covering(circle)
 	newTopics := make([]string, len(cells))
 	for i, c := range cells {
@@ -48,12 +48,14 @@ func (c *Client) UpdateSubscribe(lat, lng float64, qos byte) {
 		}
 	}
 
-	c.subscTopics = subscTopics
+	c.subscTopics = newTopics
 }
 
-func extractUnduplicateTopics(currentSubscTopics, newSubscTopics []string) (unsubscTopics, subscTopics []string) {
-	unsubscTopics = currentSubscTopics
-	subscTopics = newSubscTopics
+func extractUnduplicateTopics(currentSubscTopics, newSubscTopics []string) ([]string, []string) {
+	unsubscTopics := make([]string, len(currentSubscTopics))
+	copy(unsubscTopics, currentSubscTopics)
+	subscTopics := make([]string, len(newSubscTopics))
+	copy(subscTopics, newSubscTopics)
 	for i, ct := range currentSubscTopics {
 		for j, nt := range newSubscTopics {
 			if ct == nt {
