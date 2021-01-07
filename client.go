@@ -11,7 +11,7 @@ import (
 
 type Client struct {
 	Client        mqtt.Client
-	SubscCh       chan<- mqtt.Message
+	SubscCh       chan mqtt.Message
 	subscTopics   []string
 	subscRadiusKm float64
 }
