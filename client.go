@@ -20,7 +20,7 @@ func NewClient(c mqtt.Client, subscRadiusKm float64) *Client {
 	return &Client{Client: c, subscRadiusKm: subscRadiusKm}
 }
 
-func (c *Client) UpdateSubscribe(lat, lng float64, qos byte) {
+func (c *Client) UpdateSubscribe(lat, lng float64, qos byte) mqtt.Token {
 	circle := capOnEarth(s2.PointFromLatLng(s2.LatLngFromDegrees(lat, lng)), c.subscRadiusKm)
 	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 4}
 	cells := rc.Covering(circle)
@@ -36,19 +36,29 @@ func (c *Client) UpdateSubscribe(lat, lng float64, qos byte) {
 	}
 	for _, t := range subscTopics {
 		if t != "" {
-			c.Client.Subscribe(t, qos, callback)
-			c.Client.Publish("/api/register", 1, false, t)
+
+			if token := c.Client.Subscribe(t, qos, callback); token.Wait() && token.Error() != nil {
+				return token
+			}
+			if token := c.Client.Publish("/api/register", 1, false, t); token.Wait() && token.Error() != nil {
+				return token
+			}
 		}
 	}
 
 	for _, t := range unsubscTopics {
 		if t != "" {
-			c.Client.Unsubscribe(t)
-			c.Client.Publish("/api/unregister", 1, false, t)
+			if token := c.Client.Unsubscribe(t); token.Wait() && token.Error() != nil {
+				return token
+			}
+			if token := c.Client.Publish("/api/unregister", 1, false, t); token.Wait() && token.Error() != nil {
+				return token
+			}
 		}
 	}
 
 	c.subscTopics = newTopics
+	return nil
 }
 
 func extractUnduplicateTopics(currentSubscTopics, newSubscTopics []string) ([]string, []string) {
