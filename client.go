@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/golang/geo/s1"
@@ -22,8 +21,6 @@ func NewClient(c mqtt.Client, subscRadiusKm float64) *Client {
 }
 
 func (c *Client) UpdateSubscribe(lat, lng float64, qos byte, callback mqtt.MessageHandler) error {
-	topic := CelID2TopicName(s2.CellIDFromLatLng(s2.LatLngFromDegrees(lat, lng)))
-	log.Printf("Current point: %v", topic)
 	circle := capOnEarth(s2.PointFromLatLng(s2.LatLngFromDegrees(lat, lng)), c.subscRadiusKm)
 	rc := &s2.RegionCoverer{MaxLevel: 20, MaxCells: 4}
 	cells := rc.Covering(circle)
