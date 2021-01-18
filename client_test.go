@@ -90,7 +90,7 @@ func TestCelID2TopicName(t *testing.T) {
 		})
 	}
 }
-func TestTopicname2Token(t *testing.T) {
+func TestTopicName2Token(t *testing.T) {
 	type args struct {
 		topic string
 	}
@@ -206,7 +206,7 @@ func TestTopicname2Token(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			token, err := client.Topicname2Token(tt.args.topic)
+			token, err := client.TopicName2Token(tt.args.topic)
 			if tt.want.err == nil {
 				if err != nil {
 					t.Errorf("Expected: %v, Result: %v", tt.want.err, err)
@@ -232,11 +232,11 @@ func TestTopicname2Token(t *testing.T) {
 			clientID := point.String()
 			topic := client.CelID2TopicName(point)
 
-			convertedToken, _ := client.Topicname2Token(clientID)
+			convertedToken, _ := client.TopicName2Token(clientID)
 			if correctToken != convertedToken {
 				t.Errorf("Expected: %v, Result: %v", correctToken, convertedToken)
 			}
-			convertedToken, _ = client.Topicname2Token(topic)
+			convertedToken, _ = client.TopicName2Token(topic)
 			if correctToken != convertedToken {
 				t.Errorf("Expected: %v, Result: %v", correctToken, convertedToken)
 			}

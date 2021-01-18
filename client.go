@@ -13,7 +13,6 @@ import (
 
 type Client struct {
 	Client        mqtt.Client
-	SubscCh       chan mqtt.Message
 	subscTopics   []string
 	subscRadiusKm float64
 }
@@ -22,11 +21,11 @@ func NewClient(c mqtt.Client, subscRadiusKm float64) *Client {
 	return &Client{Client: c, subscRadiusKm: subscRadiusKm}
 }
 
-func (c *Client) UpdateSubscribe(lat, lng float64, qos byte) error {
+func (c *Client) UpdateSubscribe(lat, lng float64, qos byte, callback mqtt.MessageHandler) error {
 	topic := CelID2TopicName(s2.CellIDFromLatLng(s2.LatLngFromDegrees(lat, lng)))
 	log.Printf("Current point: %v", topic)
 	circle := capOnEarth(s2.PointFromLatLng(s2.LatLngFromDegrees(lat, lng)), c.subscRadiusKm)
-	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 4}
+	rc := &s2.RegionCoverer{MaxLevel: 20, MaxCells: 4}
 	cells := rc.Covering(circle)
 	newTopics := make([]string, len(cells))
 	for i, c := range cells {
@@ -35,52 +34,27 @@ func (c *Client) UpdateSubscribe(lat, lng float64, qos byte) error {
 
 	unsubscTopics, subscTopics := extractUnduplicateTopics(c.subscTopics, newTopics)
 
-	var callback mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
-		log.Printf("Recieved %v, %v", msg.Topic(), string(msg.Payload()))
-		c.SubscCh <- msg
-	}
-	_ = callback
-
-	// log.Printf("Subscribing topic:      %v", c.subscTopics)
-	// log.Printf("Unsubscribe topics:     %v", unsubscTopics)
-	// log.Printf("Subscribe topics:       %v", subscTopics)
-	// log.Printf("New Subscribing topics: %v", newTopics)
-
 	for _, t := range subscTopics {
 		if t != "" {
-			// c.Client.Subscribe(t, qos, callback)
-			// log.Printf("Will subscribe:          %v", t)
-			c.Client.Subscribe(t, qos, callback)
-			// token := c.Client.Subscribe(t, qos, callback)
-			// token.WaitTimeout(time.Second)
-			// token.Wait()
-			// if token := c.Client.Subscribe(t, qos, callback); token.Wait() && token.Error() != nil {
-			// 	return token.Error()
-			// }
-			// log.Printf("Will register:           %v", t)
+			if token := c.Client.Subscribe(t, qos, callback); token.Wait() && token.Error() != nil {
+				return token.Error()
+			}
 			if token := c.Client.Publish("/api/register", 0, false, t); token.Wait() && token.Error() != nil {
 				return token.Error()
 			}
 		}
 	}
-
+	_ = unsubscTopics
 	for _, t := range unsubscTopics {
 		if t != "" {
-			// log.Printf("Will unsubscribe:        %v", t)
-			c.Client.Unsubscribe(t)
-			// token := c.Client.Unsubscribe(t)
-			// token.WaitTimeout(time.Second)
-			// token.Wait()
-			// if token := c.Client.Unsubscribe(t); token.Wait() && token.Error() != nil {
-			// 	return token.Error()
-			// }
-			// log.Printf("Will unregister:         %v", t)
+			if token := c.Client.Unsubscribe(t); token.Wait() && token.Error() != nil {
+				return token.Error()
+			}
 			if token := c.Client.Publish("/api/unregister", 0, false, t); token.Wait() && token.Error() != nil {
 				return token.Error()
 			}
 		}
 	}
-
 	c.subscTopics = newTopics
 	return nil
 }
@@ -104,7 +78,7 @@ func extractUnduplicateTopics(currentSubscTopics, newSubscTopics []string) ([]st
 
 func (c *Client) Publish(lat, lng float64, qos byte, retained bool, payload interface{}) error {
 	topic := CelID2TopicName(s2.CellIDFromLatLng(s2.LatLngFromDegrees(lat, lng)))
-	if token := c.Client.Publish(topic, qos, retained, payload); token.Wait() && token.Error() != nil {
+	if token := c.Client.Publish(topic, qos, retained, payload); token.WaitTimeout(100) && token.Error() != nil {
 		return token.Error()
 	}
 	return nil
@@ -121,7 +95,7 @@ func capOnEarth(center s2.Point, radiusKm float64) s2.Cap {
 	return s2.CapFromCenterAngle(center, s1.Angle(ratio))
 }
 
-func Topicname2Token(topic string) (string, error) {
+func TopicName2Token(topic string) (string, error) {
 	tmp := strings.Replace(topic, "/", "", -1)
 	var token uint64
 	switch string(tmp[0]) {
