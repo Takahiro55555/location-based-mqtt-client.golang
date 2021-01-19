@@ -11,13 +11,14 @@ import (
 )
 
 type Client struct {
-	Client        mqtt.Client
-	subscTopics   []string
-	subscRadiusKm float64
+	Client             mqtt.Client
+	subscTopics        []string
+	subscRadiusKm      float64
+	publishTopicPrefix string
 }
 
 func NewClient(c mqtt.Client, subscRadiusKm float64) *Client {
-	return &Client{Client: c, subscRadiusKm: subscRadiusKm}
+	return &Client{Client: c, subscRadiusKm: subscRadiusKm, publishTopicPrefix: "/forward"}
 }
 
 func (c *Client) UpdateSubscribe(lat, lng float64, qos byte, callback mqtt.MessageHandler) error {
@@ -41,7 +42,6 @@ func (c *Client) UpdateSubscribe(lat, lng float64, qos byte, callback mqtt.Messa
 			}
 		}
 	}
-	_ = unsubscTopics
 	for _, t := range unsubscTopics {
 		if t != "" {
 			if token := c.Client.Unsubscribe(t); token.Wait() && token.Error() != nil {
@@ -53,6 +53,21 @@ func (c *Client) UpdateSubscribe(lat, lng float64, qos byte, callback mqtt.Messa
 		}
 	}
 	c.subscTopics = newTopics
+	return nil
+}
+
+func (c *Client) Unsubscribe() error {
+	for i, t := range c.subscTopics {
+		if t != "" {
+			if token := c.Client.Unsubscribe(t); token.Wait() && token.Error() != nil {
+				return token.Error()
+			}
+			if token := c.Client.Publish("/api/unregister", 0, false, t); token.Wait() && token.Error() != nil {
+				return token.Error()
+			}
+			c.subscTopics[i] = ""
+		}
+	}
 	return nil
 }
 
@@ -74,7 +89,7 @@ func extractUnduplicateTopics(currentSubscTopics, newSubscTopics []string) ([]st
 }
 
 func (c *Client) Publish(lat, lng float64, qos byte, retained bool, payload interface{}) error {
-	topic := CelID2TopicName(s2.CellIDFromLatLng(s2.LatLngFromDegrees(lat, lng)))
+	topic := c.publishTopicPrefix + CelID2TopicName(s2.CellIDFromLatLng(s2.LatLngFromDegrees(lat, lng)))
 	if token := c.Client.Publish(topic, qos, retained, payload); token.WaitTimeout(100) && token.Error() != nil {
 		return token.Error()
 	}
