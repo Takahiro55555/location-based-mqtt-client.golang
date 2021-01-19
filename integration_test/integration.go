@@ -78,11 +78,11 @@ func publishTrajectory(ch chan mqtt.Message, fileName string) {
 			break
 		}
 		log.Printf("Counter: %v (file: %v)", counter, fileName)
-		lat, err := strconv.ParseFloat(record[2], 64)
+		lng, err := strconv.ParseFloat(record[2], 64)
 		if err != nil {
 			log.Fatal(err)
 		}
-		lng, err := strconv.ParseFloat(record[3], 64)
+		lat, err := strconv.ParseFloat(record[3], 64)
 		if err != nil {
 			log.Fatal(err)
 		}
