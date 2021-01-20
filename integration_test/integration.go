@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/csv"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -16,6 +17,11 @@ import (
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lmicroseconds | log.Lshortfile)
+	host := flag.String("host", "localhost", "Gateway MQTT broker host")
+	port := flag.Int("port", 1884, "Gateway MQTT broker port")
+	flag.Parse()
+
+	log.Printf("[LOG] host: %v, port: %v", *host, *port)
 
 	//////////////            軌跡データの読み込み準備           //////////////
 	ch := make(chan mqtt.Message)
@@ -25,7 +31,7 @@ func main() {
 	go func() {
 		for i, f := range files {
 			log.Printf("Loading file: %v, %v/%v", dir+f.Name(), i+1, len(files))
-			publishTrajectory(ch, dir+f.Name())
+			publishTrajectory(ch, dir+f.Name(), *host, *port)
 		}
 	}()
 
@@ -43,9 +49,9 @@ func main() {
 	}
 }
 
-func publishTrajectory(ch chan mqtt.Message, fileName string) {
+func publishTrajectory(ch chan mqtt.Message, fileName string, host string, port int) {
 
-	gatewayBrokerHost := "tcp://127.0.0.1:1884"
+	gatewayBrokerHost := fmt.Sprintf("tcp://%v:%v", host, port)
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(gatewayBrokerHost)
 
@@ -60,7 +66,7 @@ func publishTrajectory(ch chan mqtt.Message, fileName string) {
 		ch <- msg
 	}
 
-	c := client.NewClient(gatewayBroker, 10.)
+	c := client.NewClient(gatewayBroker, 100.)
 
 	log.Printf("Open: %v", fileName)
 	file, err := os.Open(fileName)
@@ -90,7 +96,10 @@ func publishTrajectory(ch chan mqtt.Message, fileName string) {
 		if err := c.UpdateSubscribe(lat, lng, 0, callback); err != nil {
 			log.Fatalf("Mqtt error: %s", err)
 		}
-		if err := c.Publish(lat, lng, 0, false, fmt.Sprint(record)); err != nil {
+
+		client_id := "hoge"
+		payload := fmt.Sprintf("{\"client_id\":%v,\"objects\":[{\"lat\":%v,\"lng\":%v}]}", client_id, lat, lng)
+		if err := c.Publish(lat, lng, 0, false, payload); err != nil {
 			log.Fatalf("Mqtt error: %s", err)
 		}
 		time.Sleep(time.Millisecond * 10)
