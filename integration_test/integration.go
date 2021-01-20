@@ -20,7 +20,7 @@ func main() {
 	host := flag.String("host", "localhost", "Gateway MQTT broker host")
 	port := flag.Int("port", 1884, "Gateway MQTT broker port")
 	flag.Parse()
-
+	log.SetOutput(os.Stdout)
 	log.Printf("[LOG] host: %v, port: %v", *host, *port)
 
 	//////////////            軌跡データの読み込み準備           //////////////
@@ -66,7 +66,7 @@ func publishTrajectory(ch chan mqtt.Message, fileName string, host string, port 
 		ch <- msg
 	}
 
-	c := client.NewClient(gatewayBroker, 100.)
+	c := client.NewClient(gatewayBroker, 30.)
 
 	log.Printf("Open: %v", fileName)
 	file, err := os.Open(fileName)
@@ -98,7 +98,7 @@ func publishTrajectory(ch chan mqtt.Message, fileName string, host string, port 
 		}
 
 		client_id := "hoge"
-		payload := fmt.Sprintf("{\"client_id\":%v,\"objects\":[{\"lat\":%v,\"lng\":%v}]}", client_id, lat, lng)
+		payload := fmt.Sprintf("{\"client_id\":\"%v\",\"objects\":[{\"lat\":%v,\"lng\":%v}]}", client_id, lat, lng)
 		if err := c.Publish(lat, lng, 0, false, payload); err != nil {
 			log.Fatalf("Mqtt error: %s", err)
 		}
