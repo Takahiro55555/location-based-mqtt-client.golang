@@ -17,8 +17,8 @@ import (
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lmicroseconds | log.Lshortfile)
-	host := flag.String("host", "localhost", "Gateway MQTT broker host")
-	port := flag.Int("port", 1884, "Gateway MQTT broker port")
+	host := flag.String("host", "localhost", "Manager MQTT broker host")
+	port := flag.Int("port", 1883, "Manager MQTT broker port")
 	flag.Parse()
 	log.SetOutput(os.Stdout)
 	log.Printf("[LOG] host: %v, port: %v", *host, *port)
@@ -50,24 +50,6 @@ func main() {
 }
 
 func publishTrajectory(ch chan mqtt.Message, fileName string, host string, port int) {
-
-	gatewayBrokerHost := fmt.Sprintf("tcp://%v:%v", host, port)
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(gatewayBrokerHost)
-
-	// ゲートウェイブローカへ接続
-	gatewayBroker := mqtt.NewClient(opts)
-	if token := gatewayBroker.Connect(); token.Wait() && token.Error() != nil {
-		log.Fatalf("Mqtt error: %s", token.Error())
-	}
-	defer gatewayBroker.Disconnect(1000)
-
-	var callback mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
-		ch <- msg
-	}
-
-	c := client.NewClient(gatewayBroker, 30.)
-
 	log.Printf("Open: %v", fileName)
 	file, err := os.Open(fileName)
 	if err != nil {
@@ -76,7 +58,31 @@ func publishTrajectory(ch chan mqtt.Message, fileName string, host string, port 
 	defer file.Close()
 	reader := csv.NewReader(file)
 
-	counter := 1
+	record, err := reader.Read()
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	lng, err := strconv.ParseFloat(record[2], 64)
+	if err != nil {
+		log.Fatal(err)
+	}
+	lat, err := strconv.ParseFloat(record[3], 64)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	c, err := client.Connect(host, uint16(port), lat, lng, 10., 1000)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Disconnect(100)
+
+	var callback mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
+		ch <- msg
+	}
+
+	counter := 2
 	for {
 		record, err := reader.Read()
 		if err != nil {
