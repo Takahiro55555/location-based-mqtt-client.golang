@@ -98,7 +98,7 @@ func publishTrajectory(ch chan mqtt.Message, fileName string, host string, port 
 		}
 
 		client_id := "hoge"
-		payload := fmt.Sprintf("{\"client_id\":\"%v\",\"objects\":[{\"lat\":%v,\"lng\":%v}]}", client_id, lat, lng)
+		payload := fmt.Sprintf("{\"client_id\":\"%v\",\"objects\":{\"cars\":[{\"lat\":%v,\"lng\":%v}],\"bicycles\":[],\"humans\":[],\"other\":{}}}", client_id, lat, lng)
 		if err := c.Publish(lat, lng, 0, false, payload); err != nil {
 			log.Fatalf("Mqtt error: %s", err)
 		}
