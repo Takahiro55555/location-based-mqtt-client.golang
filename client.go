@@ -1,22 +1,152 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
+	"math/rand"
+	"sort"
 	"strings"
-
-	"github.com/golang/geo/s1"
-	"github.com/golang/geo/s2"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/golang/geo/s1"
+	"github.com/golang/geo/s2"
+	log "github.com/sirupsen/logrus"
 )
+
+type BrokerInfo struct {
+	Host string `json:"host"`
+	Port uint16 `json:"port"`
+}
+
+type GatewayBrokerInfo struct {
+	Topic      string     `json:"topic"`
+	BrokerInfo BrokerInfo `json:"broker_info"`
+}
 
 type Client struct {
 	Client             mqtt.Client
 	subscTopics        []string
 	subscRadiusKm      float64
 	publishTopicPrefix string
+	managerHost        string
+	managerPort        uint16
+	gatewaysInfo       []GatewayBrokerInfo // This data structure is not optimized, so may update.
 }
 
+// Manager をにいったん接続し、Gateway ブローカの担当エリアと接続情報を取得してから最適な Gateway ブローカに接続する
+func Connect(mHost string, mPort uint16, lat, lng float64, subscRadiusKm float64, timeout uint) (*Client, error) {
+	log.WithFields(log.Fields{
+		"mHost":         mHost,
+		"mPort":         mPort,
+		"lat":           lat,
+		"lng":           lng,
+		"subscRadiusKm": subscRadiusKm,
+	}).Trace("Connecting managr brokr...")
+	managerBroker := fmt.Sprintf("tcp://%v:%v", mHost, mPort)
+	managerOpts := mqtt.NewClientOptions()
+	managerOpts.AddBroker(managerBroker)
+	managerClient := mqtt.NewClient(managerOpts)
+
+	// connect to manager broker
+	if token := managerClient.Connect(); token.Wait() && token.Error() != nil {
+		log.WithFields(log.Fields{
+			"mHost": mHost,
+			"mPort": mPort,
+			"err":   token.Error(),
+		}).Debug("MQTT connection error (manager broker)")
+		return nil, token.Error()
+	}
+	// Do not maintain connection with manager broker
+	defer managerClient.Disconnect(100)
+
+	gatewayInfoTopic := "/api/gateway/info/all"
+	managerCh := make(chan mqtt.Message)
+	var managerCallback mqtt.MessageHandler = func(c mqtt.Client, m mqtt.Message) {
+		managerCh <- m
+	}
+	if token := managerClient.Subscribe(gatewayInfoTopic, 2, managerCallback); token.Wait() && token.Error() != nil {
+		log.WithFields(log.Fields{
+			"mHost": mHost,
+			"mPort": mPort,
+			"topic": gatewayInfoTopic,
+			"err":   token.Error(),
+		}).Debug("MQTT subcribe error (manager broker)")
+		return nil, token.Error()
+	}
+
+	var gatewaysInfo []GatewayBrokerInfo
+	for {
+		select {
+		case m := <-managerCh:
+			// JSONデコード
+			if err := json.Unmarshal(m.Payload(), &gatewaysInfo); err != nil {
+				log.WithFields(log.Fields{
+					"data": string(m.Payload()),
+					"err":  err,
+				}).Debug("JSON decode error (gateway brokers infomation)")
+			}
+			log.WithFields(log.Fields{
+				"data": string(m.Payload()),
+			}).Trace("Get manager data (gateway brokers infomation)")
+			break
+
+		case <-time.After(time.Millisecond * time.Duration(timeout)):
+			return nil, TimeoutError{Msg: "Timeout occured (gateway brokers information)"}
+		}
+		break
+	}
+
+	if len(gatewaysInfo) == 0 {
+		log.WithFields(log.Fields{
+			"gatewaysInfo": gatewaysInfo,
+		}).Debug("Gateway info erro (info size is zero )")
+		return nil, GatewayInfoError{Msg: "Gateway info erro (info size is zero )"}
+	}
+
+	// Shuffle
+	rand.Shuffle(len(gatewaysInfo), func(i, j int) {
+		gatewaysInfo[i], gatewaysInfo[j] = gatewaysInfo[j], gatewaysInfo[i]
+	})
+
+	// Unstable sorting
+	sort.Slice(gatewaysInfo, func(i, j int) bool {
+		return len(gatewaysInfo[i].Topic) > len(gatewaysInfo[j].Topic)
+	})
+
+	currentTopic := CelID2TopicName(s2.CellIDFromLatLng(s2.LatLngFromDegrees(lat, lng)))
+	var gateway GatewayBrokerInfo
+	for _, gateway = range gatewaysInfo {
+		if strings.HasPrefix(currentTopic, gateway.Topic) {
+			break
+		}
+	}
+
+	log.WithFields(log.Fields{
+		"gatewayHost":  gateway.BrokerInfo.Host,
+		"gatewayPort":  gateway.BrokerInfo.Port,
+		"gatewayTopic": gateway.Topic,
+	}).Trace("Connecting gateway brokr...")
+	gatewayBroker := fmt.Sprintf("tcp://%v:%v", gateway.BrokerInfo.Host, gateway.BrokerInfo.Port)
+	gatewayOpts := mqtt.NewClientOptions()
+	gatewayOpts.AddBroker(gatewayBroker)
+	gatewayClient := mqtt.NewClient(gatewayOpts)
+
+	// connect to manager broker
+	if token := gatewayClient.Connect(); token.Wait() && token.Error() != nil {
+		log.WithFields(log.Fields{
+			"gatewayHost": gateway.BrokerInfo.Host,
+			"gatewayPort": gateway.BrokerInfo.Port,
+			"err":         token.Error(),
+		}).Debug("MQTT connection error (gateway broker)")
+		return nil, token.Error()
+	}
+
+	return NewClient(gatewayClient, subscRadiusKm), nil
+}
+
+// NewClient function is deprecated.
+// Manager を経由せず直接 GateWay ブローカに接続（後方互換のため残している）
 func NewClient(c mqtt.Client, subscRadiusKm float64) *Client {
 	return &Client{Client: c, subscRadiusKm: subscRadiusKm, publishTopicPrefix: "/forward"}
 }
@@ -157,6 +287,10 @@ func TopicName2Token(topic string) (string, error) {
 	return tokenString[:tokenLen], nil
 }
 
+func (c *Client) Disconnect(quiesce uint) {
+	c.Client.Disconnect(quiesce)
+}
+
 func uint2Token(ui uint64) string {
 	token := ""
 	mask := uint64(0b1111000000000000000000000000000000000000000000000000000000000000)
@@ -181,4 +315,18 @@ func (e TopicNameError) Error() string {
 	return fmt.Sprintf("Error: %v", e.Msg)
 }
 
-//////////////           以上、エラー 関連                 //////////////
+type TimeoutError struct {
+	Msg string
+}
+
+func (e TimeoutError) Error() string {
+	return fmt.Sprintf("Error: %v", e.Msg)
+}
+
+type GatewayInfoError struct {
+	Msg string
+}
+
+func (e GatewayInfoError) Error() string {
+	return fmt.Sprintf("Error: %v", e.Msg)
+}
